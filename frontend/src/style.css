@@ -1,0 +1,16 @@
+/* 全局基础样式：锁定视口高度，禁止整页滚动 */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #111827;
+  background: #f6f7f9;
+}
+
+* { box-sizing: border-box; }

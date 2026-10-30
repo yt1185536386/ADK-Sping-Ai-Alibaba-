@@ -1,0 +1,40 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#eef2ff','primaryBorderColor':'#4f6ef7','lineColor':'#94a3b8','fontSize':'14px'}}}%%
+flowchart TB
+    START(["用户提问<br/>（前端 POST /api/chat/stream 发起）"]) --> GUARD0["🛡️ MessageGuardHook（BEFORE_MODEL）<br/>补全上一轮悬空的 tool 调用（「该操作已作废」）<br/>注入人工改动说明（若有）"]
+    GUARD0 --> THINK["🧠 LLM 推理（ReAct 思考）<br/>结合 System Prompt 决定下一步：<br/>直接回答 / 调用工具 / 需要人工确认"]
+
+    THINK -->|"需要数据或操作"| TOOLCALL["🔧 发起工具调用<br/>（@Tool 经 ToolCallbacks 注册）"]
+
+    THINK -->|"可直接回答"| FINAL["📝 生成最终回复"]
+    THINK -->|"写操作（approvalTools 命中）"| HITL["⏸️ HumanInTheLoopHook（AFTER_MODEL）中断<br/>返回 InterruptionMetadata"]
+
+    TOOLCALL --> WHICH{"工具绑定类型<br/>（ModuleAgent#toolBindings）"}
+    WHICH -->|"LocalToolBinding<br/>本地业务工具"| LOCAL["本地执行（JdbcTemplate）<br/>HrTools 员工/职位 · WmsTools 仓库/库存<br/>AssetTools 一物一码资产 · OrderTools 订单/配送"]
+    WHICH -->|"McpToolBinding<br/>远程 MCP 工具（common 模块）"| MCP["McpToolGateway → MCP Server :20811<br/>queryWeather · queryBusRoute · getCurrentLocation<br/>searchPlace · planRoute · driveRouteJson"]
+
+    LOCAL --> TX["事务与校验约束（util/Args）<br/>入参校验返回可读说明不抛异常<br/>TransactionTemplate 原子写入<br/>SELECT ... FOR UPDATE 防超卖"]
+    TX --> OBS
+    MCP --> OBS["👁️ 工具结果作为观察写回消息历史<br/>（高德返回尾部追加 [AMAP]{...}[/AMAP] 标记<br/>写工具回显数据库最终值 + GROUND_TRUTH_HINT）"]
+
+    OBS -->|"继续推理循环"| THINK
+    FINAL --> EXTRACT
+
+    HITL --> WAIT["接口返回 status=pending_approval<br/>batchId + 待确认清单（HitlService 落库 hitl_approval）<br/>前端 ApprovalCard：逐件勾选 · 明细预览 · 参数编辑"]
+    WAIT -->|"用户发新消息而非确认"| EXPIRE["HitlService.expirePending(threadId)<br/>旧审批单作废，卡片置灰"]
+    EXPIRE --> GUARD0
+    WAIT -->|"批准 APPROVE / 拒绝 REJECT / 改参数 EDIT<br/>（POST /api/approvals，需 ADMIN/APPROVER）"| RESUME["AgentFactory#resumeWithFeedback<br/>RunnableConfig.addHumanFeedback(InterruptionMetadata)<br/>⚠️ 绝不调用 .resume()（会冲掉 feedback）<br/>人工改动经 MessageGuardHook 注入给模型"]
+    RESUME --> THINK
+
+    EXTRACT["🔎 AgentFactory#extractAmapSpecs<br/>从本轮消息历史倒序扫描<br/>遇最后一条 UserMessage 停止<br/>抓取工具原始输出中的 [AMAP] 标记"]
+    EXTRACT --> DONE(["SSE done 事件<br/>reply 正文 + amap 数组下发<br/>消息持久化 chat_message（含标记）"])
+    DONE --> UI(["前端渲染：正文 Markdown<br/>+ 高德地图（多方案切换）"])
+
+    style START fill:#dcfce7,stroke:#22c55e
+    style DONE fill:#dcfce7,stroke:#22c55e
+    style UI fill:#dcfce7,stroke:#22c55e
+    style HITL fill:#fef9c3,stroke:#eab308
+    style WAIT fill:#fef9c3,stroke:#eab308
+    style EXPIRE fill:#fef9c3,stroke:#eab308
+    style RESUME fill:#fef9c3,stroke:#eab308
+    style MCP fill:#fdf4ff,stroke:#a855f7
+    style GUARD0 fill:#eff6ff,stroke:#3b82f6

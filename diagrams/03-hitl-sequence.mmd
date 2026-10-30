@@ -1,0 +1,47 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#eef2ff','primaryBorderColor':'#4f6ef7','lineColor':'#94a3b8','fontSize':'13px'},'sequence':{'actorMargin':18,'boxMargin':8,'noteMargin':8,'messageMargin':32,'height':40}}}%%
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant FE as 前端 Vue3<br/>ChatPanel / ApprovalCard
+    participant CC as ChatController<br/>（SSE）
+    participant AF as AgentFactory<br/>调度入口
+    participant AG as ReactAgent<br/>（模块 Agent + Hooks）
+    participant HL as HitlService<br/>（hitl_approval）
+    participant LL as LLM 模型服务<br/>bailian/deepseek/company
+    participant MS as MysqlSaver<br/>Checkpoint
+
+    U->>FE: 输入"批量入库到主仓：防化服 30件…"
+    FE->>CC: POST /api/chat/stream (SSE)
+    CC->>HL: expirePending(threadId)：作废上一轮未处理审批单
+    CC->>CC: ConversationStore.save(user 消息)
+    CC->>AF: classify()（module 为空时：一次模型调用选模块）
+    AF-->>CC: ModuleAgent（分类失败回退第一个模块）
+    CC-->>FE: SSE meta {threadId, provider, model, module, routed, userMsgId}
+    CC->>AF: 后台线程 chatModule(module, provider, model, threadId)
+    AF->>MS: 加载上下文（线程名带模块命名空间，如 wms@threadId）
+    AF->>AG: 启动模块 Agent（MessageGuardHook 先闭合悬空 tool 调用）
+    AG->>LL: 推理：需调用 batch_inbound（写操作）
+    LL-->>AG: 发起工具调用
+    AG->>AG: HumanInTheLoopHook（AFTER_MODEL）命中 approvalTools → 中断
+    AG-->>AF: InterruptionMetadata（待审批清单）
+    AF->>AF: attachPreview：BatchInboundService 只读生成明细预览表
+    AF-->>CC: pending 结果
+    CC->>HL: create 审批单批次（batchId，落库 hitl_approval）
+    CC-->>FE: SSE pending {batchId, approvals[]（含预览表/候选清单）}
+    FE->>FE: 渲染 ApprovalCard：<br/>明细预览表逐行核对 · 参数可编辑(EDIT)
+    U->>FE: 核对/调整参数 → 批准 / 拒绝
+    Note over U,FE: 也可直接打字「确认」，等价于批准执行
+    FE->>CC: POST /api/approvals {batchId, decisions[]}（需 ADMIN/APPROVER 角色）
+    CC->>HL: decide() 记录决策与编辑后参数
+    CC->>AF: resumeWithFeedback(...)
+    AF->>AG: RunnableConfig.addHumanFeedback(InterruptionMetadata)<br/>⚠️ 不调用 .resume()（会覆盖 feedback）
+    AG->>AG: MessageGuardHook 把人工改动作为 UserMessage 注入
+    AG->>LL: 继续推理（批准的工具真正落库，回显数据库最终值）
+    LL-->>AG: 生成最终回复
+    AG-->>AF: ApprovalOutcome{reply, amapSpecs}
+    AF-->>CC: 结果
+    CC-->>FE: SSE chunk…（拿到完整回复后分段伪流式）
+    CC->>CC: ConversationStore.save(assistant 消息, 含 AMAP 标记) → assistantMsgId
+    CC-->>FE: SSE done {reply, amap[], assistantMsgId}
+    FE->>FE: 渲染 Markdown 正文 + 地图（如有）<br/>消息操作按钮（复制/删除/重新生成）
+    FE-->>U: 完整回复展示

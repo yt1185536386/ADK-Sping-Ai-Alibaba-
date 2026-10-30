@@ -1,0 +1,34 @@
+# ADK MCP Server：外部工具（天气/高德）经 MCP 协议暴露
+# 安全：/mcp 无鉴权，仅绑定本机使用，不得对外暴露
+server:
+  port: 20811
+  # /mcp 无鉴权，必须只监听回环地址（默认 0.0.0.0 会把工具暴露给整个局域网）
+  address: 127.0.0.1
+
+spring:
+  application:
+    name: adk-mcp-server
+  # 与主应用共用同一套 DB_* 环境变量，读同一个 external_tool 表
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:hr_spring_ai_adk_agent}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=${DB_USE_SSL:false}
+    username: ${DB_USERNAME:hr_agent}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  ai:
+    mcp:
+      server:
+        name: adk-tools        # 与主应用 McpToolGateway 查找名、client 连接名一致
+        version: 1.0.0
+        protocol: STREAMABLE   # 单端点 /mcp（Spring AI 1.1 默认 SSE /sse，须显式设置）
+
+# API_KEY_ENCRYPTION_KEY 经 relaxed binding 绑定到 api.key.encryption-key（与主应用相同）
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health        # GET /actuator/health 供 start.ps1 做就绪探测
+
+logging:
+  level:
+    com.hr.mcpserver: info

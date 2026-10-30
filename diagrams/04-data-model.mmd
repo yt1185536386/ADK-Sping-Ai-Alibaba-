@@ -1,0 +1,232 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#eef2ff','primaryBorderColor':'#4f6ef7','lineColor':'#94a3b8','fontSize':'13px'},'er':{'layoutDirection':'TB'}}}%%
+erDiagram
+    API_KEY {
+        bigint id PK
+        varchar provider UK "bailian/deepseek/company"
+        varchar name "渠道名称"
+        varchar protocol "openai 兼容 / dashscope"
+        varchar auth_type "bearer 等"
+        varchar api_key "密钥（仅存库中，不入代码库）"
+        varchar base_url "接口地址（/v1 结尾自动拼接）"
+        json models "全部模型（含向量模型）"
+        varchar default_model "默认推理模型"
+        varchar embedding_model "向量模型（不参与推理模型展示）"
+        varchar vendor "qwen/deepseek/openai"
+        int weight "权重"
+        tinyint is_default "是否默认渠道"
+        tinyint enabled "启用开关"
+    }
+    EXTERNAL_TOOL {
+        bigint id PK
+        varchar tool_key UK "weather/amap/amap_js"
+        varchar name "工具显示名"
+        varchar base_url "接口基础地址"
+        varchar auth_type "none/query-key/bearer/header-key/js-key"
+        varchar auth_key_name "鉴权参数名（amap_js 借用存 jscode）"
+        varchar api_key "密钥（AES-256-GCM 加密存储）"
+        int timeout_ms "调用超时"
+        tinyint enabled "启用状态"
+    }
+    CHAT_MESSAGE {
+        bigint id PK
+        varchar thread_id "会话ID"
+        varchar role "user/assistant"
+        varchar provider "本条使用的渠道"
+        varchar model "本条使用的模型"
+        mediumtext content "内容（assistant 含 [AMAP] 标记）"
+        datetime created_at
+    }
+    HITL_APPROVAL {
+        varchar id PK "审批单号 HITL-..."
+        varchar batch_id "批次号（同次中断多单同批）"
+        varchar thread_id "会话 ID"
+        varchar module_key "hr/wms/order"
+        varchar provider "渠道"
+        varchar model "模型"
+        varchar tool_name "待审批工具名"
+        varchar tool_call_id "模型 toolCall id（恢复匹配用）"
+        text arguments "原始调用参数 JSON"
+        varchar status "PENDING/APPROVED/REJECTED/EDITED"
+        text feedback "拒绝原因/修改说明"
+        text edited_arguments "用户编辑后参数 JSON"
+        mediumtext result "恢复执行后的回复"
+    }
+    GRAPH_CKPT {
+        varchar thread_name "模块命名空间 hr@tid/wms@tid"
+        text tables "graph_checkpoint + graph_thread"
+        text note "框架 MysqlSaver 自建，重启不丢上下文"
+    }
+    SYS_USER {
+        bigint id PK
+        varchar username UK "登录账号"
+        varchar password "BCrypt 加密密码"
+        varchar display_name "显示名"
+        varchar role "ADMIN/APPROVER/USER/COURIER"
+        bigint employee_id FK "关联员工（COURIER 必填且在职）"
+        tinyint enabled "1启用 0禁用"
+    }
+    EMPLOYEE {
+        bigint id PK
+        varchar name
+        varchar gender
+        varchar phone
+        varchar email
+        bigint position_id FK
+        date hire_date
+        varchar status "在职/离职"
+    }
+    POSITION {
+        bigint id PK
+        varchar title "职位名称"
+        varchar department
+        varchar salary_range
+        text description
+    }
+    WMS_WAREHOUSE {
+        bigint id PK
+        varchar code UK "仓库编码"
+        varchar name
+        varchar address
+        varchar status "启用/停用"
+    }
+    WMS_ITEM {
+        bigint id PK
+        varchar sku UK "SKU-时间戳-序号（系统自动生成）"
+        varchar name
+        varchar category
+        varchar unit
+        varchar spec "规格（名称+规格判同一物品）"
+    }
+    WMS_SKU_SEQ {
+        varchar ts_key PK "时间戳分段 yyyyMMddHHmmss"
+        int next_val "该秒已发出的最大序号"
+    }
+    WMS_STOCK {
+        bigint id PK
+        bigint warehouse_id FK
+        bigint item_id FK
+        int quantity
+        int safety_stock "安全库存（低于预警）"
+    }
+    WMS_ORDER {
+        bigint id PK
+        varchar order_no UK "入库/出库单号（批量：批次号-行号）"
+        varchar order_type "入库/出库"
+        bigint warehouse_id FK
+        bigint item_id FK
+        int quantity
+        varchar party "供应商/收货方"
+        varchar operator "经办人"
+        varchar status "已完成"
+        varchar remark "批量入库记批次号"
+    }
+    WMS_STOCK_LOG {
+        bigint id PK
+        bigint warehouse_id FK
+        bigint item_id FK
+        varchar change_type "入库/出库"
+        int quantity
+        int before_qty
+        int after_qty
+        varchar ref_no "关联单号"
+        varchar operator
+    }
+    WMS_ASSET {
+        bigint id PK
+        varchar asset_no UK "一物一码 AST-yyyyMMdd-NNNN"
+        bigint item_id FK
+        bigint warehouse_id FK
+        varchar status "在库/已调拨/已出库/已销毁"
+        bigint holder_employee_id FK "当前使用人（ck_asset_holder：仅已调拨非空）"
+        datetime allocated_at
+        datetime scrapped_at
+        varchar scrap_reason
+    }
+    WMS_ASSET_LOG {
+        bigint id PK
+        varchar asset_no "资产编号"
+        varchar action "入库/登记/调拨/退回/仓间调拨/出库/销毁"
+        varchar from_status
+        varchar to_status
+        bigint employee_id FK
+        varchar employee_name "姓名快照"
+        bigint warehouse_id FK
+        varchar ref_no
+        varchar remark
+    }
+    BIZ_ORDER {
+        bigint id PK
+        varchar order_no UK
+        varchar customer
+        bigint item_id FK
+        int quantity
+        decimal unit_price
+        decimal total_amount
+        varchar status "待处理/已发货/已退货/已取消"
+    }
+    BIZ_DELIVERY {
+        bigint id PK
+        varchar delivery_no UK "DLV+yyyyMMdd+4位序号"
+        bigint order_id FK
+        bigint employee_id FK "配送员工（V1）"
+        varchar employee_name "配送员姓名（冗余）"
+        varchar status "待配送/配送中/已送达/已取消"
+        varchar address "配送地址"
+        varchar destination "目的地"
+        datetime deadline "订单截止时间"
+        datetime delivered_at "送达时间"
+        decimal from_lng "起点经度（V2 迁移列）"
+        decimal from_lat "起点纬度（V2）"
+        decimal to_lng "终点经度（V2）"
+        decimal to_lat "终点纬度（V2）"
+        text route_json "路线规划结果（V2）"
+        bigint courier_id "配送员用户 sys_user.id（V2）"
+        bigint warehouse_id "发货仓库（V2）"
+        varchar outbound_no "关联出库单号（V2）"
+        datetime confirmed_at "出库确认时间（V2）"
+    }
+    BIZ_PURCHASE {
+        bigint id PK
+        varchar purchase_no UK
+        bigint order_id FK "可为空（独立采购）"
+        bigint item_id FK
+        int quantity
+        bigint warehouse_id FK "入库仓库（已入库自动加库存）"
+        bigint employee_id FK "采购员工"
+        varchar supplier
+        varchar status "待采购/已入库/已取消"
+    }
+    BIZ_RETURN {
+        bigint id PK
+        varchar return_no UK
+        bigint order_id FK
+        bigint item_id FK
+        int quantity
+        bigint warehouse_id FK
+        varchar reason
+        varchar status "待处理/已入库/已取消"
+    }
+
+    POSITION ||--o{ EMPLOYEE : "编制（FK RESTRICT）"
+    SYS_USER ||--o| EMPLOYEE : "关联（COURIER 必填）"
+    WMS_WAREHOUSE ||--o{ WMS_STOCK : "存放"
+    WMS_ITEM ||--o{ WMS_STOCK : "库存（UK 仓库×商品）"
+    WMS_WAREHOUSE ||--o{ WMS_ORDER : "出入库"
+    WMS_ITEM ||--o{ WMS_ORDER : "出入库商品"
+    WMS_WAREHOUSE ||--o{ WMS_STOCK_LOG : "流水"
+    WMS_ITEM ||--o{ WMS_STOCK_LOG : "流水商品"
+    WMS_WAREHOUSE ||--o{ WMS_ASSET : "存放资产"
+    WMS_ITEM ||--o{ WMS_ASSET : "资产商品"
+    EMPLOYEE ||--o{ WMS_ASSET : "持有（已调拨）"
+    WMS_ITEM ||--o{ WMS_SKU_SEQ : "按秒取号生成 SKU"
+    BIZ_ORDER ||--o{ BIZ_DELIVERY : "发货配送"
+    BIZ_ORDER ||--o{ BIZ_PURCHASE : "补货采购"
+    BIZ_ORDER ||--o{ BIZ_RETURN : "退货"
+    WMS_ITEM ||--o{ BIZ_ORDER : "订购商品"
+    WMS_ITEM ||--o{ BIZ_PURCHASE : "采购商品"
+    WMS_WAREHOUSE ||--o{ BIZ_PURCHASE : "入库仓库"
+    WMS_WAREHOUSE ||--o{ BIZ_RETURN : "退货入库"
+    WMS_ITEM ||--o{ BIZ_RETURN : "退货商品"
+    EMPLOYEE ||--o{ BIZ_PURCHASE : "采购经办"
+    EMPLOYEE ||--o{ BIZ_DELIVERY : "配送（V1 员工）"
+    SYS_USER ||--o{ BIZ_DELIVERY : "配送员接单（V2 courier_id）"

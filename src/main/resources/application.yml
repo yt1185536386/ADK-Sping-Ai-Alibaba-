@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: hr-agent
+  # 注意：模型 API Key / 地址 / 模型名 / 协议 均不在此配置，
+  # 统一存放在数据库 api_key 表（渠道配置），由 AgentFactory 按需懒加载构建模型。
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:hr_spring_ai_adk_agent}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=${DB_USE_SSL:false}
+    username: ${DB_USERNAME:hr_agent}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      mode: always   # 启动时执行 schema.sql（全部为 IF NOT EXISTS，可重复执行）
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # 静态页面（含 index.html 里的前端逻辑）不缓存，避免浏览器一直跑旧版 JS：
+          # 旧版页面遇到 HITL 的 pending_approval 只会把它当普通回复显示，结果"没有确认框可点"
+          no-cache: true
+  # 统一工具接入层（MCP）client：全部外部第三方 API 工具（天气/高德/配送路线）
+  # 由独立 MCP Server 进程承载（mcp-server/ 项目，:20811，STREAMABLE 协议，server 名 adk-tools）。
+  # 承重约定：MCP Server 必须先于本应用启动——模块 Agent 有缓存且首次聊天时才懒构建，
+  # MCP 后启动会让 common 模块缓存到 0 个工具，需重启后端才能恢复。
+  # 未接入时 McpStartupCheck 与 AgentFactory 打 ERROR 日志（不阻断启动）。
+  ai:
+    mcp:
+      client:
+        streamable-http:
+          connections:
+            adk-tools:
+              # MCP Server 已绑定 127.0.0.1（无鉴权不暴露局域网）；
+              # 这里显式用 127.0.0.1，避免 localhost 解析到 ::1 时连不上只监听 IPv4 回环的服务
+              url: http://127.0.0.1:20811/mcp
+
+# 当前使用的渠道，对应 api_key 表的 provider 字段；换渠道只改这里
+hr:
+  agent:
+    # 前端未指定来源时的默认推理渠道
+    provider: bailian
+    # 向量模型默认用百炼的 qwen3.7-text-embedding；额度用完后改成其它渠道（如 company）即可
+    embedding-provider: bailian
+    # 上下文滑动窗口：发给模型的最大历史消息条数（控制长会话 token 消耗；<=0 不截断）
+    # 截断只从 UserMessage 边界切，assistant(tool_calls) 与 tool 响应始终成对保留
+    context-max-messages: 40
+
+# MCP Server 端配置见 mcp-server/src/main/resources/application.yml
+
+server:
+  port: 20810
+
+logging:
+  level:
+    com.hr.agent: info

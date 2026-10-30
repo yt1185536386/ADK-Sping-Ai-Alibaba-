@@ -1,0 +1,132 @@
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#eef2ff','primaryBorderColor':'#4f6ef7','lineColor':'#94a3b8','fontSize':'14px'},'flowchart':{'curve':'basis'}}}%%
+flowchart TB
+    subgraph CLIENT["🖥️ 浏览器（Vue 3.5 + Element Plus 2.8 · Vue Router · Vite 5 构建）"]
+        UI_CHAT["ChatPanel 对话区（features/chat）<br/>SSE 流式渲染 · 消息操作 · 多会话"]
+        UI_APPROVAL["ApprovalCard 审批卡片（features/chat）<br/>逐件勾选 · 明细预览 · 参数编辑"]
+        UI_FORM["OutboundFormCard（features/chat）<br/>表单出库（绕过 HITL）"]
+        UI_AMAP["AmapMap 高德地图组件<br/>路线规划 · 多方案切换 · 全屏"]
+        UI_MGMT["MgmtDialog 管理弹窗（features/manage）<br/>员工/职位/仓库/订单 CRUD"]
+        UI_DLV["DeliveryMgmt 配送管理（features/delivery）<br/>列表 · 创建 · 地图选点 · 确认出库"]
+        UI_MY["MyDeliveries 我的配送单<br/>配送员视图 · 查看路线 · 送达确认"]
+        UI_LOGIN["LoginView 登录页<br/>Basic 凭据存 localStorage"]
+    end
+
+    subgraph SERVER["⚙️ 主应用 hr-agent :20810（Spring Boot 3.5.6 + Spring AI Alibaba 1.1.2.0）"]
+        direction TB
+        subgraph CONTROLLERS["controller 接入层"]
+            CHAT_CTRL["ChatController<br/>POST /api/chat · /api/chat/stream（SSE）<br/>事件：meta / outbound_form / pending / chunk / done"]
+            MGMT_CTRL["ManageController<br/>/api/manage/** 管理模块 CRUD"]
+            DLV_CTRL["DeliveryController<br/>/api/delivery/** 配送单 V2<br/>管理员两阶段 + /my/** 配送员"]
+            FORM_CTRL["OutboundFormController<br/>/api/form/outbound 表单出库"]
+            AMAP_CTRL["AmapController<br/>/api/amap/refresh 地图数据重新生成"]
+            AUTH_CTRL["AuthController<br/>/api/auth/check 凭据校验"]
+        end
+        subgraph AGENTS["agents Agent 调度层"]
+            FACTORY["AgentFactory<br/>classify() 一次模型调用选模块<br/>chatModule() 懒加载缓存 ReactAgent<br/>resumeWithFeedback() 断点续跑"]
+            CONTRACT["ModuleAgent 契约<br/>key / systemPrompt / toolBindings / approvalTools"]
+            COMMON["CommonAgent<br/>通用问答（工具全部来自远程 MCP）"]
+            HR["HrAgent<br/>员工 / 职位（HrTools）"]
+            WMS["WmsAgent<br/>仓库 / 库存 / 资产（WmsTools + AssetTools）"]
+            ORDER["OrderAgent<br/>销售订单 / 配送 / 采购 / 退货（OrderTools）"]
+            HOOKS["hooks：HumanInTheLoopHook（AFTER_MODEL 写操作中断）<br/>MessageGuardHook（BEFORE_MODEL 闭合悬空 tool 调用 + 注入人工改动）"]
+        end
+        subgraph TOOLS["mcp 统一工具接入层"]
+            GW["McpToolGateway<br/>本地 @Tool 与远程 MCP 工具统一成 ToolCallback"]
+            BIND["ToolBinding<br/>LocalToolBinding（本地业务）/ McpToolBinding（远程 MCP）"]
+        end
+        subgraph SVC["service 业务服务层"]
+            DLV_SVC["DeliveryService（配送 V2 正典路径）<br/>创建（不动库存）→确认出库（扣库存+出库单+流水+资产标记）→送达"]
+            ASSET_SVC["AssetService<br/>资产登记/调拨/仓间调拨/退回/销毁<br/>实现 spi/ApprovalOptionsProvider 候选清单"]
+            BATCH_SVC["BatchInboundService<br/>parse→preview→execute 三段式<br/>实现 spi/ApprovalPreviewProvider 明细预览"]
+            AMAP_SVC["AmapRouteService<br/>配送驾车路线（经 McpToolGateway 调 driveRouteJson）"]
+            GUARD["EmployeeGuard 员工状态守卫<br/>SkuGenerator SKU 取号"]
+        end
+        subgraph STORE["store / event 持久化与事件"]
+            CONV["ConversationStore<br/>chat_message 会话审计"]
+            HITL_SVC["HitlService<br/>hitl_approval 审批单 · expirePending 作废旧单"]
+            EVT["EmployeeResignedEvent →<br/>AssetRecycleOnResignListener<br/>@TransactionalEventListener + @Async<br/>离职后异步回收名下资产"]
+        end
+        subgraph INFRA["config 基础设施 · 安全"]
+            SAVER["MysqlSaver<br/>Checkpoint 持久化（graph_checkpoint/graph_thread）<br/>线程名按模块命名空间 hr@tid / wms@tid"]
+            SEC["SecurityConfig<br/>HTTP Basic 无状态<br/>POST /api/approvals 需 ADMIN/APPROVER"]
+            AUTH["UserConfig（唯一 UserDetailsService）<br/>DbUserDetailsService 读 sys_user 为主<br/>内存 admin/user 兜底"]
+            MIG["DeliveryV2ColumnMigrator<br/>biz_delivery V2 扩展列幂等补齐"]
+        end
+    end
+
+    subgraph MCPS["🧩 MCP Server :20811（独立进程 com.hr:adk-mcp-server，STREAMABLE /mcp）"]
+        EXT_T["ExternalApiTools（6 个外部工具）<br/>queryWeather 天气 · queryBusRoute 公交<br/>getCurrentLocation IP定位 · searchPlace 地点<br/>planRoute 路线规划 · driveRouteJson 驾车路线JSON"]
+        EXT_CFG["ExternalToolConfigService + ApiKeyEncryptionService<br/>只读副本（与主应用注释互标同步义务）<br/>AES-256-GCM 解密 external_tool 密钥"]
+    end
+
+    subgraph DB["🗄️ MySQL 9.x（库 hr_spring_ai_adk_agent）"]
+        T_KEY["api_key<br/>模型渠道 / 密钥 / 模型列表"]
+        T_TOOL["external_tool<br/>外部工具配置 + 加密密钥"]
+        T_MSG["chat_message<br/>对话记录（含 AMAP 标记）"]
+        T_HITL["hitl_approval<br/>HITL 审批单"]
+        T_CK["graph_checkpoint / graph_thread<br/>Agent 上下文（框架自建）"]
+        T_USER["sys_user<br/>登录账号 · 角色 · 关联员工"]
+        T_BIZ["业务表<br/>employee / position / wms_* / biz_*"]
+        T_SEQ["wms_sku_seq<br/>SKU 取号序列"]
+    end
+
+    subgraph EXT["🌐 外部服务"]
+        AMAP["高德开放平台<br/>restapi.amap.com（Web服务）<br/>webapi.amap.com（JS API）"]
+        WTTR["wttr.in 天气"]
+        LLM["模型渠道（api_key 表驱动）<br/>bailian 百炼 · deepseek · company 公司模型<br/>OpenAI 兼容 / DashScope 协议"]
+    end
+
+    UI_LOGIN --> AUTH_CTRL
+    UI_CHAT -- "SSE 流式对话" --> CHAT_CTRL
+    UI_APPROVAL -- "POST /api/approvals" --> CHAT_CTRL
+    UI_FORM -- "POST /api/form/outbound" --> FORM_CTRL
+    UI_MGMT -- "管理 CRUD" --> MGMT_CTRL
+    UI_AMAP -- "打开地图/重新生成" --> AMAP_CTRL
+    UI_DLV -- "配送管理" --> DLV_CTRL
+    UI_MY -- "我的配送单" --> DLV_CTRL
+
+    CHAT_CTRL --> FACTORY
+    FACTORY --> CONTRACT
+    CONTRACT --> COMMON
+    CONTRACT --> HR
+    CONTRACT --> WMS
+    CONTRACT --> ORDER
+    COMMON & HR & WMS & ORDER --> HOOKS
+    HOOKS --> GW
+    GW --> BIND
+    BIND -- "McpToolBinding（common 模块）" --> EXT_T
+    FACTORY -.-> SAVER
+    CHAT_CTRL --> HITL_SVC
+    CHAT_CTRL --> CONV
+
+    DLV_CTRL --> DLV_SVC
+    DLV_SVC --> AMAP_SVC
+    DLV_SVC --> ASSET_SVC
+    WMS --> ASSET_SVC
+    HR -. "离职事件" .-> EVT
+    EVT --> ASSET_SVC
+    AMAP_SVC -- "经 McpToolGateway" --> GW
+
+    EXT_T --> AMAP
+    EXT_T --> WTTR
+    AGENTS --> LLM
+    UI_AMAP -. "JS API key" .-> AMAP
+
+    EXT_CFG --> T_TOOL
+    CHAT_CTRL --> T_MSG
+    HITL_SVC --> T_HITL
+    MGMT_CTRL --> T_BIZ
+    DLV_SVC --> T_BIZ
+    ASSET_SVC --> T_BIZ
+    BATCH_SVC --> T_BIZ
+    GUARD --> T_SEQ
+    SAVER --> T_CK
+    FACTORY -.-> T_KEY
+    AUTH --> T_USER
+    SEC -.-> AUTH
+
+    style CLIENT fill:#f8fafc,stroke:#cbd5e1
+    style SERVER fill:#eef2ff,stroke:#4f6ef7
+    style MCPS fill:#fdf4ff,stroke:#a855f7
+    style DB fill:#f0fdf4,stroke:#22c55e
+    style EXT fill:#fff7ed,stroke:#f59e0b

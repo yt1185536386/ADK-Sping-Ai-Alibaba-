@@ -1,0 +1,35 @@
+# ==================== 敏感信息（严禁提交）====================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ==================== 运行日志（可能含请求参数/异常细节）====================
+*.log
+logs/
+
+# ==================== 构建产物 ====================
+target/
+mcp-server/target/
+frontend/dist/
+# 注意：src/main/resources/static/ 下的前端构建产物**需要提交**——
+# mvn package 不构建前端，新克隆者不打前端包就没有页面可跑
+
+# ==================== 前端依赖 ====================
+frontend/node_modules/
+node_modules/
+
+# ==================== IDE / 系统 ====================
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+Thumbs.db
+.DS_Store
+
+# ==================== 其他 ====================
+*.tmp
+*.bak
