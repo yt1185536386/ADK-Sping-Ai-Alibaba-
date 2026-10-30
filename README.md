@@ -8,7 +8,7 @@
 - **两个进程**：主应用 `hr-agent`（:20810，Web + Agent 引擎 + 前端托管）与独立 MCP Server（:20811，全部外部第三方工具）。
 - **渠道参数入库**：密钥 / 地址 / 模型 / 协议全部存于 MySQL `api_key` 表，代码库中不含任何明文 Key；前端可按「来源 → 模型」选择推理模型。
 - **所有写操作经人工确认（HITL）**：前端弹确认框，可批准 / 拒绝 / 改参数后再执行；断点续跑靠 checkpoint，重启后可继续审批。
-- **登录认证**：Spring Security + HTTP Basic（无状态），用户主存 `sys_user` 表、内存账号兜底（见「登录与认证」）。
+- **登录认证**：Spring Security + HTTP Basic（无状态），用户主存 `sys_user` 表；首次启动引导式创建初始管理员（无硬编码口令，见「登录与认证」）。
 
 ## 系统架构
 
@@ -19,7 +19,7 @@
             ├─ controller/   Web 端点（chat / approvals / manage /        │
             │                  delivery / form / amap / auth）            │
             ├─ config/AgentFactory                                        │
-            │     classify()  ──一次模型调用分类──► ModuleAgent           │
+            │     classify()  ──关键词规则直达 / 一次模型调用分类──► 模块   │
             │     chatModule() ──ReactAgent + HITL + checkpoint           │
             ├─ agents/        ModuleAgent 契约 + 4 个模块实现             │
             ├─ tools/         @Tool（本地业务工具：Hr / Wms / Asset / Order）│
@@ -146,7 +146,7 @@ cd mcp-server && mvn -B -DskipTests package && cd ..  # 首次或 mcp-server 变
 
 | 分层 | Java | 说明 |
 |---|---|---|
-| 调度入口 | `config/AgentFactory#classify` | 一次分类调用选出模块，之后与「显式指定模块」走完全相同的执行链路 |
+| 调度入口 | `config/AgentFactory#classify` | 关键词规则直达（零模型调用）或一次分类调用选出模块，之后与「显式指定模块」走完全相同的执行链路 |
 | 模块契约 | `agents/ModuleAgent` | `key / displayName / agentName / description / systemPrompt / toolBean / toolBindings / approvalTools` |
 | 通用模块 | `agents/CommonAgent` | 兜底问答（闲聊、跨模块综合问题），工具全部来自远程 MCP |
 | 人力模块 | `agents/HrAgent` + `tools/HrTools` | 职位与员工管理 |
@@ -348,11 +348,12 @@ OpenAI 兼容接口要求 `assistant(tool_calls)` 后面**直接**跟着覆盖�
 | `GET /api/modules`（匿名） | 已注册业务模块（key / 名称 / agentName / 职责 / **需人工审批的工具清单**） |
 | `POST /api/chat` | `{message, threadId, provider, model, module?}`；`module` 为空走 orchestrator 自动调度 |
 | `POST /api/chat/stream` | 同上参数，SSE 流式返回模型输出 |
-| `GET /api/approvals?threadId=`（匿名） | 某会话下仍待确认的审批项（刷新页面后恢复确认框用） |
-| `POST /api/approvals`（ADMIN/APPROVER） | `{batchId, decisions:[{id, action, arguments?, reason?}]}`，`action` = `APPROVE` / `REJECT` / `EDIT` |
-| `GET /api/threads?limit=50`（匿名） | 会话列表（最后活跃时间倒序，含消息数、首个问题） |
-| `GET /api/threads/{threadId}`（匿名） | 某会话的历史消息（含每条用的渠道/模型） |
-| `DELETE /api/threads/{threadId}`（匿名） | 删除某会话的历史记录 |
+| `GET /api/approvals?threadId=` | 某会话下仍待确认的审批项（刷新页面后恢复确认框用；普通用户限本人会话，ADMIN/APPROVER 不限） |
+| `GET /api/approvals/pending-all`（ADMIN/APPROVER） | 审批员工作台：跨会话的全部待审批项 |
+| `POST /api/approvals`（ADMIN/APPROVER） | `{batchId, decisions:[{id, action, arguments?, reason?}]}`，`action` = `APPROVE` / `REJECT` / `EDIT`；支持跨人审批 |
+| `GET /api/threads?limit=50` | 会话列表（本人会话，ADMIN 全部；最后活跃时间倒序） |
+| `GET /api/threads/{threadId}` | 某会话的历史消息（限本人或 ADMIN） |
+| `DELETE /api/threads/{threadId}` | 删除某会话的历史记录（限本人或 ADMIN） |
 | `DELETE /api/messages/{id}` | 删除单条消息 |
 | `GET /api/embedding`（匿名） | 当前向量渠道与模型 |
 | `POST /api/embedding/test` | `{text, provider?, model?}` 向量连通性测试 |
@@ -556,7 +557,7 @@ npm run build           # 产出到 ../src/main/resources/static
 | **人工审批单** | MySQL `hitl_approval` | 待确认清单 + 决策 + 恢复执行结果（重启后可继续审批） |
 | **会话历史/审计** | MySQL `chat_message` | 应用显式写入（threadId / 角色 / 渠道 / 模型 / 内容 / 时间） |
 | 渠道配置与密钥 | MySQL `api_key` | 见上文 |
-| 登录用户 | MySQL `sys_user`（主）+ 内存（兜底） | 见「登录与认证」 |
+| 登录用户 | MySQL `sys_user`（主）+ 内存应急（仅数据库不可用且配置 ADMIN_INITIAL_PASSWORD 时） | 见「登录与认证」 |
 | 业务数据（HR） | MySQL `position` / `employee` | 员工职位 |
 | 业务数据（WMS） | MySQL `wms_warehouse` / `wms_item` / `wms_stock` / `wms_order` / `wms_stock_log` / `wms_asset` / `wms_asset_log` | 仓库商品库存、单据、一物一码资产 |
 | 业务数据（订单/配送） | MySQL `biz_order` / `biz_delivery` / `biz_purchase` / `biz_return` | 销售订单、配送、采购入库、退货入库 |
