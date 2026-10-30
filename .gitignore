@@ -13,6 +13,11 @@ logs/
 target/
 mcp-server/target/
 frontend/dist/
+*.class
+*.jar
+*.war
+hs_err_pid*
+replay_pid*
 # 注意：src/main/resources/static/ 下的前端构建产物**需要提交**——
 # mvn package 不构建前端，新克隆者不打前端包就没有页面可跑
 
